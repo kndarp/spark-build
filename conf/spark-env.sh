@@ -12,23 +12,23 @@ mkdir -p "${HADOOP_CONF_DIR}"
 [ -f "${MESOS_SANDBOX}/hdfs-site.xml" ] && cp "${MESOS_SANDBOX}/hdfs-site.xml" "${HADOOP_CONF_DIR}"
 [ -f "${MESOS_SANDBOX}/core-site.xml" ] && cp "${MESOS_SANDBOX}/core-site.xml" "${HADOOP_CONF_DIR}"
 
+
 cd $MESOS_SANDBOX
 
 MESOS_NATIVE_JAVA_LIBRARY=/opt/mesosphere/libmesos-bundle/lib/libmesos.so
 
 # Unless explicitly directed, use bootstrap (defined on L55 of Dockerfile) to lookup the IP of the driver agent
 # this should be LIBPROCESS_IP iff the driver is on the host network, $(hostname) when it's not (e.g. CNI).
-if [ -z ${NO_BOOTSTRAP} ]; then
+if [ -z ${SKIP_BOOTSTRAP_IP_DETECT} ]; then
     if [ -f ${BOOTSTRAP} ]; then
-        echo "Using bootstrap to set SPARK_LOCAL_IP" >&2
         SPARK_LOCAL_IP=$($BOOTSTRAP --get-task-ip)
-        echo "SPARK_LOCAL_IP = ${SPARK_LOCAL_IP}" >&2
+        echo "spark-env: Configured SPARK_LOCAL_IP with bootstrap: ${SPARK_LOCAL_IP}" >&2
     else
-        echo "ERROR: Unable to find bootstrap here: ${BOOTSTRAP}, exiting." >&2
+        echo "ERROR: Unable to find bootstrap to configure SPARK_LOCAL_IP at ${BOOTSTRAP}, exiting." >&2
         exit 1
     fi
 else
-    echo "Skipping bootstrap IP detection"
+    echo "spark-env: Skipping bootstrap IP detection" >&2
 fi
 
 # I first set this to MESOS_SANDBOX, as a Workaround for MESOS-5866
@@ -44,24 +44,47 @@ export MESOS_AUTHENTICATEE="com_mesosphere_dcos_ClassicRPCAuthenticatee"
 
 echo "spark-env: User: $(whoami)" >&2
 
-if ls ${MESOS_SANDBOX}/*.base64 1> /dev/null 2>&1; then
-    for f in $MESOS_SANDBOX/*.base64 ; do
-        echo "decoding $f" >&2
-        secret=$(basename ${f} .base64)
-        cat ${f} | base64 -d > ${secret}
-    done
+if [ -n "${SPARK_SECURITY_KERBEROS_KDC_HOSTNAME}" ] && [ -n "${SPARK_SECURITY_KERBEROS_KDC_PORT}" ] && [ -n "${SPARK_SECURITY_KERBEROS_REALM}" ]; then
+    echo "Templating krb5.conf from environment" >&2
+    # working dir is /mnt/mesos/sandbox
+    CONFIG_TEMPLATE_KRB5CONF=../../../etc/krb5.conf.mustache,../../../etc/krb5.conf $BOOTSTRAP -template -resolve=false --print-env=false -install-certs=false
+    cat ../../../etc/krb5.conf
+fi
+
+if [[ -n "${SPARK_MESOS_KRB5_CONF_BASE64}" ]]; then
+    KRB5CONF=${SPARK_MESOS_KRB5_CONF_BASE64}
 fi
 
 if [[ -n "${KRB5_CONFIG_BASE64}" ]]; then
+    KRB5CONF=${KRB5_CONFIG_BASE64}
+fi
+
+if [[ -n "${KRB5CONF}" ]]; then
+    echo "Decoding base64 encoded krb5.conf" >&2
     if base64 --help | grep -q GNU; then
           BASE64_D="base64 -d" # GNU
       else
           BASE64_D="base64 -D" # BSD
     fi
-    echo "spark-env: Copying krb config from $KRB5_CONFIG_BASE64 to /etc/" >&2
-    echo "${KRB5_CONFIG_BASE64}" | ${BASE64_D} > /etc/krb5.conf
+    echo "spark-env: Copying krb config from $KRB5CONF to /etc/" >&2
+    echo "${KRB5CONF}" | ${BASE64_D} > /etc/krb5.conf
 else
-    echo "spark-env: No kerberos KDC config found" >&2
+    echo "spark-env: No SPARK_MESOS_KRB5_CONF_BASE64 to decode" >&2
+fi
+
+if [ -n "${STATSD_UDP_HOST}" ] && [ -n "${STATSD_UDP_PORT}" ]; then
+    SPARK_CONF_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+    if [ -f "${SPARK_CONF_DIR}/metrics.properties.template" ]; then
+        echo "spark-env: Configuring StatsD endpoint ${STATSD_UDP_HOST}:${STATSD_UDP_PORT} in ${SPARK_CONF_DIR}/metrics.properties" >&2
+        sed -e "s/<STATSD_UDP_HOST>/${STATSD_UDP_HOST}/g" \
+            -e "s/<STATSD_UDP_PORT>/${STATSD_UDP_PORT}/g" \
+            ${SPARK_CONF_DIR}/metrics.properties.template >${SPARK_CONF_DIR}/metrics.properties
+    else
+        echo "spark-env: Skipping metrics configuration: Template not found: ${SPARK_CONF_DIR}/metrics.properties.template" >&2
+    fi
+else
+    echo "spark-env: Skipping metrics configuration: STATSD_UDP_HOST/STATSD_UDP_PORT are not defined" >&2
+    echo "spark-env: StatsD metrics require Mesos UCR. For dispatcher metrics, enable the 'UCR_containerizer' option. For driver metrics, include '--conf spark.mesos.containerizer=mesos' in your run"
 fi
 
 # Options read when launching programs locally with

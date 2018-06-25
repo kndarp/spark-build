@@ -37,27 +37,39 @@ func newSparkVal(flagName, propName, desc string) *sparkVal {
 }
 
 type sparkArgs struct {
-	mainClass 			string
-	kerberosPrincipal 	string
-	keytabSecretPath	string
-	tgtSecretPath		string
-	tgtSecretValue		string
-	propertiesFile    	string
-	properties        	map[string]string
+	mainClass            string
+	kerberosPrincipal    string
+	keytabSecretPath     string
+	tgtSecretPath        string
+	tgtSecretValue       string
+	keystoreSecretPath   string
+	keystorePassword     string
+	privateKeyPassword   string
+	truststoreSecretPath string
+	truststorePassword   string
+	saslSecret           string
+	propertiesFile       string
+	properties           map[string]string
 
-	boolVals   			[]*sparkVal
-	stringVals 			[]*sparkVal
+	boolVals   []*sparkVal
+	stringVals []*sparkVal
 
-	app		  			*url.URL
-	appArgs 			[]string
+	app     *url.URL
+	appArgs []string
 
-	isScala				bool
-	isPython			bool
-	isR					bool
+	isScala  bool
+	isPython bool
+	isR      bool
 }
 
 func NewSparkArgs() *sparkArgs {
 	return &sparkArgs{
+		"",
+		"",
+		"",
+		"",
+		"",
+		"",
 		"",
 		"",
 		"",
@@ -139,13 +151,26 @@ Args:
 		PlaceHolder("PROP=VALUE").StringMapVar(&args.properties)
 	submit.Flag("kerberos-principal", "Principal to be used to login to KDC.").
 		PlaceHolder("user@REALM").Default("").StringVar(&args.kerberosPrincipal)
-	submit.Flag("keytab-secret-path", "path to Keytab in secret store to be used in the Spark drivers").
+	submit.Flag("keytab-secret-path", "Path to Keytab in secret store to be used in the Spark drivers").
 		PlaceHolder("/mykeytab").Default("").StringVar(&args.keytabSecretPath)
-	submit.Flag("tgt-secret-path", "Path to ticket granting ticket (TGT) in secret store to be used " +
+	submit.Flag("tgt-secret-path", "Path to ticket granting ticket (TGT) in secret store to be used "+
 		"in the Spark drivers").PlaceHolder("/mytgt").Default("").StringVar(&args.tgtSecretPath)
 	submit.Flag("tgt-secret-value", "Value of TGT to be used in the drivers, must be base64 encoded").
 		Default("").StringVar(&args.tgtSecretValue)
-
+	submit.Flag("keystore-secret-path", "Path to keystore in secret store for TLS/SSL. "+
+		"Make sure to set --keystore-password and --private-key-password as well.").
+		PlaceHolder("__dcos_base64__keystore").Default("").StringVar(&args.keystoreSecretPath)
+	submit.Flag("keystore-password", "A password to the keystore.").
+		Default("").StringVar(&args.keystorePassword)
+	submit.Flag("private-key-password", "A password to the private key in the keystore.").
+		Default("").StringVar(&args.privateKeyPassword)
+	submit.Flag("truststore-secret-path", "Path to truststore in secret store for TLS/SSL. "+
+		"Make sure to set --truststore-password as well.").
+		PlaceHolder("__dcos_base64__truststore").Default("").StringVar(&args.truststoreSecretPath)
+	submit.Flag("truststore-password", "A password to the truststore.").
+		Default("").StringVar(&args.truststorePassword)
+	submit.Flag("executor-auth-secret", "Path to secret 'cookie' to use for Executor authentication "+
+		"block transfer encryption. Make one with dcos spark secret").Default("").StringVar(&args.saslSecret)
 	submit.Flag("isR", "Force using SparkR").Default("false").BoolVar(&args.isR)
 	submit.Flag("isPython", "Force using Python").Default("false").BoolVar(&args.isPython)
 
@@ -197,8 +222,8 @@ Args:
 	val.flag(submit).StringVar(&val.s)
 	args.stringVals = append(args.stringVals, val)
 
-	val = newSparkVal("py-files", "spark.submit.pyFiles", "Add .py, .zip or .egg files to " +
-		"be distributed with your application. If you depend on multiple Python files we recommend packaging them " +
+	val = newSparkVal("py-files", "spark.submit.pyFiles", "Add .py, .zip or .egg files to "+
+		"be distributed with your application. If you depend on multiple Python files we recommend packaging them "+
 		"into a .zip or .egg.")
 	val.flag(submit).StringVar(&val.s)
 	args.stringVals = append(args.stringVals, val)
@@ -219,47 +244,6 @@ func sparkSubmitHelp() string {
 	return buf.String()
 }
 
-func prepareBase64Secret(secretPath string, isEncoded bool) string {
-	ss := strings.Split(secretPath, "/")
-	s := ss[len(ss) - 1]  // The secret file without any slashes
-	// TODO document how secret formatting works w.r.t decoding
-	// secrets with __dcos_base64__ will be decoded by mesos or spark
-	if strings.HasPrefix(s, "__dcos_base64__") || strings.HasSuffix(s, "base64") {
-		// if we have the .base64, maintain the whole thing spark-env will decode it
-		return strings.TrimPrefix(s, "__dcos_base64__")
-	}
-	if isEncoded {
-		return s + ".base64"
-	} else {
-		return s
-	}
-}
-
-func addArgsForFileBasedSecret(args *sparkArgs, secretPath, property string) {
-	args.properties["spark.mesos.driver.secret.names"] = secretPath
-	args.properties[property] = prepareBase64Secret(secretPath, false)
-	args.properties["spark.mesos.driver.secret.filenames"] = prepareBase64Secret(secretPath, true)
-}
-
-func setupKerberosAuthArgs(args *sparkArgs) error {
-	args.properties["spark.mesos.containerizer"] = "mesos"
-	if args.keytabSecretPath != "" {  // using keytab secret
-		addArgsForFileBasedSecret(args, args.keytabSecretPath, "spark.yarn.keytab")
-		return nil
-	}
-	if args.tgtSecretPath != "" {  // using tgt secret
-		addArgsForFileBasedSecret(args, args.tgtSecretPath, "spark.mesos.driverEnv.KRB5CCNAME")
-		return nil
-	}
-	if args.tgtSecretValue != "" {  // using secret by value
-		args.properties["spark.mesos.driver.secret.values"] = args.tgtSecretValue
-		args.properties["spark.mesos.driverEnv.KRB5CCNAME"] = "tgt"
-		args.properties["spark.mesos.driver.secret.filenames"] = "tgt.base64"
-		return nil
-	}
-	return errors.New(fmt.Sprintf("Unable to add Kerberos args, got args %s", args))
-}
-
 func parseApplicationFile(args *sparkArgs) error {
 	appString := args.app.String()
 	fs := strings.Split(appString, "/")
@@ -269,7 +253,7 @@ func parseApplicationFile(args *sparkArgs) error {
 		if args.mainClass != "" {
 			return errors.New("Can only specify main class when using a Scala or Java Spark application")
 		}
-		log.Printf("Parsing application as R job")
+		client.PrintMessage("Parsing application as R job")
 		if args.mainClass != "" {
 			return errors.New("Cannot specify a main class for an R job")
 		}
@@ -284,7 +268,7 @@ func parseApplicationFile(args *sparkArgs) error {
 		if args.mainClass != "" {
 			return errors.New("Can only specify main class when using a Scala or Java Spark application")
 		}
-		log.Printf("Parsing application as Python job")
+		client.PrintMessage("Parsing application as Python job")
 		if args.mainClass != "" {
 			return errors.New("Cannot specify a main class for an python job")
 		}
@@ -327,12 +311,12 @@ ARGLOOP:
 				// if it's not of the format --flag=val which scopt allows
 				if strings.HasPrefix(arg, "-") {
 					appFlags = append(appFlags, arg)
-					if strings.Contains(arg, "=") || (i + 1) >= len(args) {
+					if strings.Contains(arg, "=") || (i+1) >= len(args) {
 						i += 1
 					} else {
 						// if there's a value with this flag, add it
-						if !strings.HasPrefix(args[i + 1], "-") {
-							appFlags = append(appFlags, args[i + 1])
+						if !strings.HasPrefix(args[i+1], "-") {
+							appFlags = append(appFlags, args[i+1])
 							i += 1
 						}
 						i += 1
@@ -396,10 +380,8 @@ ARGLOOP:
 			i += 1
 		}
 	}
-	if config.Verbose {
-		log.Printf("Translated spark-submit arguments: '%s'\n", argsEquals)
-		log.Printf("Translated application arguments: '%s'\n", appFlags)
-	}
+	client.PrintVerbose("Translated spark-submit arguments: '%s'", argsEquals)
+	client.PrintVerbose("Translated application arguments: '%s'", appFlags)
 
 	return argsEquals, appFlags
 }
@@ -436,44 +418,38 @@ func getValsFromPropertiesFile(path string) map[string]string {
 	return vals
 }
 
-func getStringFromTree(m map[string]interface{}, path []string) (string, error) {
-	if len(path) == 0 {
-		return "", errors.New(fmt.Sprintf("empty path, nothing to navigate in: %s", m))
+func fetchMarathonConfig() (map[string]interface{}, error) {
+	// fetch the spark task definition from Marathon, extract the docker image and HDFS config url:
+	url := client.CreateServiceURL("replaceme", "")
+	url.Path = fmt.Sprintf("/marathon/v2/apps/%s", config.ServiceName)
+
+	responseBytes, err := client.CheckHTTPResponse(
+		client.HTTPQuery(client.CreateHTTPURLRequest("GET", url, nil, "", "")))
+
+	responseJson := make(map[string]interface{})
+	err = json.Unmarshal(responseBytes, &responseJson)
+	if err != nil {
+		return responseJson, err
 	}
-	obj, ok := m[path[0]]
-	if !ok {
-		return "", errors.New(fmt.Sprintf("unable to find key '%s' in map: %s", path[0], m))
-	}
-	if len(path) == 1 {
-		ret, ok := obj.(string)
-		if !ok {
-			return "", errors.New(fmt.Sprintf("unable to cast map value '%s' (for key '%s') as string: %s", obj, path[0], m))
+
+	if config.Verbose {
+		client.PrintMessage("Response from Marathon lookup of task '%s':", config.ServiceName)
+		prettyJson, err := json.MarshalIndent(responseJson, "", " ")
+		if err != nil {
+			log.Fatalf("Failed to prettify json (%s): %s", err, responseJson)
+		} else {
+			client.PrintMessage("%s\n", string(prettyJson))
 		}
-		return ret, nil
-	} else {
-		next, ok := obj.(map[string]interface{})
-		if !ok {
-			return "", errors.New(fmt.Sprintf("unable to cast map value '%s' (for key '%s') as string=>object map: %s", obj, path[0], m))
-		}
-		return getStringFromTree(next, path[1:])
 	}
+	return responseJson, nil
 }
 
-func appendToProperty(propValue, toAppend string, args *sparkArgs) {
-	_, contains := args.properties[propValue]
-	if !contains {
-		args.properties[propValue] = toAppend
-	} else {
-		args.properties[propValue] += "," + toAppend
-	}
-}
-
-func buildSubmitJson(cmd *SparkCommand) (string, error) {
+func buildSubmitJson(cmd *SparkCommand, marathonConfig map[string]interface{}) (string, error) {
 	// first, import any values in the provided properties file (space separated "key val")
 	// then map applicable envvars
 	// then parse all -Dprop.key=propVal, and all --conf prop.key=propVal
 	// then map flags
-	submit, args := sparkSubmitArgSetup()  // setup
+	submit, args := sparkSubmitArgSetup() // setup
 	// convert and get application flags, add them to the args passed to the spark app
 	submitArgs, appFlags := cleanUpSubmitArgs(cmd.submitArgs, args.boolVals)
 	args.appArgs = append(args.appArgs, appFlags...)
@@ -485,13 +461,19 @@ func buildSubmitJson(cmd *SparkCommand) (string, error) {
 
 	for _, boolVal := range args.boolVals {
 		if boolVal.b {
-			args.properties[boolVal.propName] = "true"
+			_, contains := args.properties[boolVal.propName]
+			if !contains {
+				args.properties[boolVal.propName] = "true"
+			}
 		}
 	}
 
 	for _, stringVal := range args.stringVals {
 		if len(stringVal.s) != 0 {
-			args.properties[stringVal.propName] = stringVal.s
+			_, contains := args.properties[stringVal.propName]
+			if !contains {
+				args.properties[stringVal.propName] = stringVal.s
+			}
 		}
 	}
 
@@ -536,108 +518,71 @@ func buildSubmitJson(cmd *SparkCommand) (string, error) {
 		args.properties["spark.app.name"] = args.mainClass
 	}
 
-	// fetch the spark task definition from Marathon, extract the docker image and HDFS config url:
-	url := client.CreateServiceURL("replaceme", "")
-	url.Path = fmt.Sprintf("/marathon/v2/apps/%s", config.ServiceName)
-
-	responseBytes, err := client.CheckHTTPResponse(
-		client.HTTPQuery(client.CreateHTTPURLRequest("GET", url, "", "", "")))
-
-	responseJson := make(map[string]interface{})
-	err = json.Unmarshal(responseBytes, &responseJson)
-	if err != nil {
-		return "", err
-	}
-
-	if config.Verbose {
-		log.Printf("Response from Marathon lookup of task '%s':", config.ServiceName)
-		prettyJson, err := json.MarshalIndent(responseJson, "", " ")
-		if err != nil {
-			log.Fatalf("Failed to prettify json (%s): %s", err, responseJson)
-		} else {
-			fmt.Fprintf(os.Stderr, "%s\n", string(prettyJson))
-		}
-	}
-
 	// driver image
+	var imageSource string
 	_, contains := args.properties["spark.mesos.executor.docker.image"]
-	if !contains {
+	if contains {
+		imageSource = "Spark config: spark.mesos.executor.docker.image"
+	} else {
 		if cmd.submitDockerImage == "" {
-			dispatcher_image, err := getStringFromTree(responseJson, []string{"app", "container", "docker", "image"})
+			dispatcher_image, err := getStringFromTree(marathonConfig, []string{"app", "container", "docker", "image"})
 			if err != nil {
 				return "", err
 			}
 			args.properties["spark.mesos.executor.docker.image"] = dispatcher_image
+			imageSource = "dispatcher: container.docker.image"
 		} else {
 			args.properties["spark.mesos.executor.docker.image"] = cmd.submitDockerImage
+			imageSource = "flag: --docker-image"
 		}
 	}
-	log.Printf("Using %s as the image for the driver", args.properties["spark.mesos.executor.docker.image"])
 
 	_, contains = args.properties["spark.mesos.executor.docker.forcePullImage"]
-	if !contains {
-		log.Printf("Pulling image %s for executors, by default. To bypass set " +
-			"spark.mesos.executor.docker.forcePullImage=false", args.properties["spark.mesos.executor.docker.image"])
+	if contains {
+		client.PrintMessage("Using image '%s' for the driver (from %s)",
+			args.properties["spark.mesos.executor.docker.image"], imageSource)
+	} else {
+		client.PrintMessage("Using image '%s' for the driver and the executors (from %s).",
+			args.properties["spark.mesos.executor.docker.image"], imageSource)
+		client.PrintMessage("To disable this image on executors, set "+
+			"spark.mesos.executor.docker.forcePullImage=false")
 		args.properties["spark.mesos.executor.docker.forcePullImage"] = "true"
 	}
 
-	// DCOS_SPACE
-	if cmd.submitDcosSpace == "" { // get the DCOS_SPACE from the marathon app
-		dispatcherId, err := getStringFromTree(responseJson, []string{"app", "id"})
-		if err != nil {
-			return "", err
-		}
-		cmd.submitDcosSpace = dispatcherId
+	// Get the DCOS_SPACE from the marathon app
+	dispatcherID, err := getStringFromTree(marathonConfig, []string{"app", "id"})
+	if err != nil {
+		client.PrintMessage("Failed to get Dispatcher app id from Marathon app definition: %s", err)
+		return "", err
 	}
-	log.Printf("Setting DCOS_SPACE to %s", cmd.submitDcosSpace)
-	appendToProperty("spark.mesos.driver.labels", fmt.Sprintf("DCOS_SPACE:%s", cmd.submitDcosSpace),
+	client.PrintVerbose("Setting DCOS_SPACE to %s", dispatcherID)
+	appendToProperty("spark.mesos.driver.labels", fmt.Sprintf("DCOS_SPACE:%s", dispatcherID),
+		args)
+	appendToProperty("spark.mesos.task.labels", fmt.Sprintf("DCOS_SPACE:%s", dispatcherID),
 		args)
 
 	// HDFS config
-	hdfs_config_url, err := getStringFromTree(responseJson, []string{"app", "labels", "SPARK_HDFS_CONFIG_URL"})
+	hdfs_config_url, err := getStringFromTree(marathonConfig, []string{"app", "labels", "SPARK_HDFS_CONFIG_URL"})
 	if err == nil && len(hdfs_config_url) != 0 { // fail silently: it's normal for this to be unset
 		hdfs_config_url = strings.TrimRight(hdfs_config_url, "/")
 		appendToProperty("spark.mesos.uris",
 			fmt.Sprintf("%s/hdfs-site.xml,%s/core-site.xml", hdfs_config_url, hdfs_config_url), args)
 	}
 
-	// kerberos configuration (include base64-encoded copy of --keytab OR --tgt):
-	if args.kerberosPrincipal != "" {
-		if args.keytabSecretPath == "" && args.tgtSecretPath == "" && args.tgtSecretValue == "" {
-			return "", errors.New("Need to provide Keytab secret, TGT secret, or TGT value " +
-				"with Kerberos principal")
-		}
-
-		if args.keytabSecretPath != "" && (args.tgtSecretValue != "" || args.tgtSecretPath != "") {
-			return "", errors.New("Keytabs and TGTs cannot be used together")
-		}
-
-		if args.tgtSecretPath != "" && args.tgtSecretValue != "" {
-			return "", errors.New("Cannot use a TGT-by-value and a TGT-by-secret at the same time")
-		}
-
-		log.Printf("Using Kerberos principal %s", args.kerberosPrincipal)
-		args.properties["spark.yarn.principal"] = args.kerberosPrincipal
-		krb5conf, err := getStringFromTree(responseJson, []string{"app", "env", "SPARK_MESOS_KRB5_CONF_BASE64"})
-		if err != nil && krb5conf == "" {
-			log.Printf("WARNING: krb5.conf (base64 encoded) could not be extracted from the " +
-				"Dispatcher's config")
-		}
-
-		if krb5conf != "" {
-			_, contains := args.properties["spark.mesos.driverEnv.KRB5_CONFIG_BASE64"]
-			if !contains {
-				args.properties["spark.mesos.driverEnv.KRB5_CONFIG_BASE64"] = krb5conf
-			} else {
-				log.Printf("Using user-specified krb5 config")
-			}
-		}
-
-		err = setupKerberosAuthArgs(args)
-		if err != nil {
-			return "", err
-		}
+	// kerberos configuration:
+	err = SetupKerberos(args, marathonConfig)
+	if err != nil {
+		return "", err
 	}
+
+	// TLS configuration
+	err = SetupTLS(args)
+	if err != nil {
+		return "", err
+	}
+
+	// RPC and SASL
+	SetupSASL(args)
 
 	jsonMap := map[string]interface{}{
 		"action":               "CreateSubmissionRequest",
@@ -654,9 +599,7 @@ func buildSubmitJson(cmd *SparkCommand) (string, error) {
 		return "", err
 	}
 
-	if config.Verbose {
-		log.Printf("Spark-submit json: %s\n", jsonPayload)
-	}
+	client.PrintVerbose("spark-submit json: %s", jsonPayload)
 
 	return string(jsonPayload), nil
 }

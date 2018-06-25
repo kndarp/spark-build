@@ -19,7 +19,6 @@
 
 # Basing from Mesos image so the Mesos native library is present.
 FROM ubuntu:14.04
-MAINTAINER Michael Gummelt <mgummelt@mesosphere.io>, Arthur Rand <arand@mesosphere.io>
 
 # Set environment variables.
 ENV DEBIAN_FRONTEND "noninteractive"
@@ -36,15 +35,17 @@ RUN apt-get update && \
             unzip \
             r-base
 
+# lib mesos
 RUN mkdir -p /opt/mesosphere/ && \
     cd /opt/mesosphere && \
-    curl -L -O https://downloads.mesosphere.io/libmesos-bundle/libmesos-bundle-1.10-1.4-63e0814.tar.gz && \
-    tar zxf libmesos-bundle-1.10-1.4-63e0814.tar.gz && \
-    rm libmesos-bundle-1.10-1.4-63e0814.tar.gz && \
+    curl -L -O https://downloads.mesosphere.io/libmesos-bundle/libmesos-bundle-1.10-1.4.x-a35c801.tar.gz && \
+    tar zxf libmesos-bundle-1.10-1.4.x-a35c801.tar.gz && \
+    rm libmesos-bundle-1.10-1.4.x-a35c801.tar.gz && \
     curl -L -O https://downloads.mesosphere.com/dcos-commons/artifacts/0.30.0/bootstrap.zip && \
     unzip bootstrap.zip && \
     rm bootstrap.zip
 
+# JVM/JCE
 RUN mkdir -p /usr/lib/jvm/ && \
     cd /usr/lib/jvm && \
     curl -L -O https://downloads.mesosphere.com/java/jre-8u152-linux-x64-jce-unlimited.tar.gz && \
@@ -74,6 +75,10 @@ RUN ln -s /var/lib/runit/service/spark /etc/service/spark
 RUN ln -s /var/lib/runit/service/nginx /etc/service/nginx
 
 ADD dist /opt/spark/dist
+ADD krb5.conf.mustache /etc/
+
+# Add external jar for pushing metrics via StatsD (https://github.com/vidhyaarvind/spark-statsd)
+ADD jars/spark-statsd-1.0.0.jar /opt/spark/dist/jars/
 
 # required to run as nobody
 RUN chmod -R ugo+rw /etc/nginx

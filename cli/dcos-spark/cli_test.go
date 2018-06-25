@@ -73,6 +73,4 @@ func TestStringLongArgs(t *testing.T) {
 	java_options = append(java_options, "-Djava.thirdConfig=thirdSetting")
 	inputArgs = "--driver-java-option='-Djava.firstConfig=firstSetting -Djava.secondConfig=secondSetting -Djava.thirdConfig=thirdSetting' --conf spark.cores.max=8"
 	testLongArgInternal(inputArgs, java_options, t)
-
-
 }

@@ -1,7 +1,10 @@
 ---
-post_title: History Server
-menu_order: 30
-enterprise: 'no'
+layout: layout.pug
+navigationTitle: 
+excerpt:
+title: History Server
+menuWeight: 30
+
 ---
 
 DC/OS Apache Spark includes The [Spark History Server][3]. Because the history server requires HDFS, you must explicitly enable it.
@@ -20,7 +23,9 @@ DC/OS Apache Spark includes The [Spark History Server][3]. Because the history s
 1. Create `spark-history-options.json`:
 
         {
-          "hdfs-config-url": "http://api.hdfs.marathon.l4lb.thisdcos.directory/v1/endpoints"
+          "service": {
+            "hdfs-config-url": "http://api.hdfs.marathon.l4lb.thisdcos.directory/v1/endpoints"
+          }
         }
 
 1. Install The Spark History Server:
@@ -46,7 +51,7 @@ DC/OS Apache Spark includes The [Spark History Server][3]. Because the history s
 
         dcos spark run --submit-args="--conf spark.eventLog.enabled=true --conf spark.eventLog.dir=hdfs://hdfs/history ... --class MySampleClass  http://external.website/mysparkapp.jar"
 
-1.  Visit your job in the dispatcher at `http://<dcos_url>/service/spark/`. It will include a link to the history server entry for that job.
+1.  Visit your job in the dispatcher at `http://<dcos_url>/service/spark/`. To visit the history server and fetch results from your Spark applications go to `http://<dcos_url>/service/spark-history/` and follow the links on your application IDs.
 
  [3]: http://spark.apache.org/docs/latest/monitoring.html#viewing-after-the-fact
  [10]: https://dcos.io/docs/1.9/administering-clusters/sshcluster/
