@@ -418,33 +418,7 @@ func getValsFromPropertiesFile(path string) map[string]string {
 	return vals
 }
 
-func fetchMarathonConfig() (map[string]interface{}, error) {
-	// fetch the spark task definition from Marathon, extract the docker image and HDFS config url:
-	url := client.CreateServiceURL("replaceme", "")
-	url.Path = fmt.Sprintf("/marathon/v2/apps/%s", config.ServiceName)
-
-	responseBytes, err := client.CheckHTTPResponse(
-		client.HTTPQuery(client.CreateHTTPURLRequest("GET", url, nil, "", "")))
-
-	responseJson := make(map[string]interface{})
-	err = json.Unmarshal(responseBytes, &responseJson)
-	if err != nil {
-		return responseJson, err
-	}
-
-	if config.Verbose {
-		client.PrintMessage("Response from Marathon lookup of task '%s':", config.ServiceName)
-		prettyJson, err := json.MarshalIndent(responseJson, "", " ")
-		if err != nil {
-			log.Fatalf("Failed to prettify json (%s): %s", err, responseJson)
-		} else {
-			client.PrintMessage("%s\n", string(prettyJson))
-		}
-	}
-	return responseJson, nil
-}
-
-func buildSubmitJson(cmd *SparkCommand, marathonConfig map[string]interface{}) (string, error) {
+func buildSubmitJson(cmd *SparkCommand) (string, error) {
 	// first, import any values in the provided properties file (space separated "key val")
 	// then map applicable envvars
 	// then parse all -Dprop.key=propVal, and all --conf prop.key=propVal
@@ -518,59 +492,30 @@ func buildSubmitJson(cmd *SparkCommand, marathonConfig map[string]interface{}) (
 		args.properties["spark.app.name"] = args.mainClass
 	}
 
-	// driver image
-	var imageSource string
+	// driver image: use provided value
 	_, contains := args.properties["spark.mesos.executor.docker.image"]
-	if contains {
-		imageSource = "Spark config: spark.mesos.executor.docker.image"
-	} else {
-		if cmd.submitDockerImage == "" {
-			dispatcher_image, err := getStringFromTree(marathonConfig, []string{"app", "container", "docker", "image"})
-			if err != nil {
-				return "", err
-			}
-			args.properties["spark.mesos.executor.docker.image"] = dispatcher_image
-			imageSource = "dispatcher: container.docker.image"
-		} else {
-			args.properties["spark.mesos.executor.docker.image"] = cmd.submitDockerImage
-			imageSource = "flag: --docker-image"
-		}
+	if !contains && cmd.submitDockerImage != "" {
+	    args.properties["spark.mesos.executor.docker.image"] = cmd.submitDockerImage
 	}
 
 	_, contains = args.properties["spark.mesos.executor.docker.forcePullImage"]
-	if contains {
-		client.PrintMessage("Using image '%s' for the driver (from %s)",
-			args.properties["spark.mesos.executor.docker.image"], imageSource)
-	} else {
-		client.PrintMessage("Using image '%s' for the driver and the executors (from %s).",
-			args.properties["spark.mesos.executor.docker.image"], imageSource)
-		client.PrintMessage("To disable this image on executors, set "+
-			"spark.mesos.executor.docker.forcePullImage=false")
+	if !contains {
+    	client.PrintMessage("Enabling forcePullImage by default. " +
+    		"To disable this, set spark.mesos.executor.docker.forcePullImage=false")
 		args.properties["spark.mesos.executor.docker.forcePullImage"] = "true"
 	}
 
-	// Get the DCOS_SPACE from the marathon app
-	dispatcherID, err := getStringFromTree(marathonConfig, []string{"app", "id"})
-	if err != nil {
-		client.PrintMessage("Failed to get Dispatcher app id from Marathon app definition: %s", err)
-		return "", err
+    // Get the DCOS_SPACE from the service name
+    dcosSpace := config.ServiceName
+    if !strings.HasPrefix(dcosSpace, "/") {
+    	dcosSpace = "/" + dcosSpace
 	}
-	client.PrintVerbose("Setting DCOS_SPACE to %s", dispatcherID)
-	appendToProperty("spark.mesos.driver.labels", fmt.Sprintf("DCOS_SPACE:%s", dispatcherID),
-		args)
-	appendToProperty("spark.mesos.task.labels", fmt.Sprintf("DCOS_SPACE:%s", dispatcherID),
-		args)
-
-	// HDFS config
-	hdfs_config_url, err := getStringFromTree(marathonConfig, []string{"app", "labels", "SPARK_HDFS_CONFIG_URL"})
-	if err == nil && len(hdfs_config_url) != 0 { // fail silently: it's normal for this to be unset
-		hdfs_config_url = strings.TrimRight(hdfs_config_url, "/")
-		appendToProperty("spark.mesos.uris",
-			fmt.Sprintf("%s/hdfs-site.xml,%s/core-site.xml", hdfs_config_url, hdfs_config_url), args)
-	}
+	client.PrintVerbose("Setting DCOS_SPACE to %s", dcosSpace)
+    appendToProperty("spark.mesos.driver.labels", fmt.Sprintf("DCOS_SPACE:%s", dcosSpace), args)
+    appendToProperty("spark.mesos.task.labels", fmt.Sprintf("DCOS_SPACE:%s", dcosSpace), args)
 
 	// kerberos configuration:
-	err = SetupKerberos(args, marathonConfig)
+	err = SetupKerberos(args)
 	if err != nil {
 		return "", err
 	}

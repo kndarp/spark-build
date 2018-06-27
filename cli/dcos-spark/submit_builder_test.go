@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/mesosphere/dcos-commons/cli/config"
 	"github.com/stretchr/testify/suite"
 	"os"
 	"testing"
@@ -19,7 +20,6 @@ const keytabPrefixed = "__dcos_base64__keytab"
 const keytab = "keytab"
 const sparkAuthSecret = "spark-auth-secret"
 const marathonAppId = "spark-app"
-var marathonConfig = map[string]interface{}{ "app": map[string]interface{}{ "id": marathonAppId }}
 
 type CliTestSuite struct {
 	suite.Suite
@@ -30,7 +30,10 @@ func (suite *CliTestSuite) SetupSuite() {
 	os.Setenv("DCOS_SSL_VERIFY", "false")
 	// buildSubmitJson also fetches the service URL to configure spark.master:
 	os.Setenv("DCOS_URL", "https://fake-url")
+	// buildSubmitJson uses the service name to figure out the DCOS_SPACE value:
+    config.ServiceName = marathonAppId
 }
+
 func TestCliTestSuite(t *testing.T) {
 	suite.Run(t, new(CliTestSuite))
 }
@@ -91,6 +94,8 @@ func createCommand(inputArgs, dockerImage string) SparkCommand {
 	}
 }
 
+ No newline at end of file
+
 func (suite *CliTestSuite) TestPayloadSimple() {
 	inputArgs := fmt.Sprintf(
 		"--driver-cores %s "+
@@ -100,7 +105,7 @@ func (suite *CliTestSuite) TestPayloadSimple() {
 			"%s --input1 value1 --input2 value2", driverCores, maxCores, driverMemory, mainClass, appJar)
 
 	cmd := createCommand(inputArgs, image)
-	payload, err := buildSubmitJson(&cmd, marathonConfig)
+	payload, err := buildSubmitJson(&cmd)
 
 	m := make(map[string]interface{})
 
@@ -123,11 +128,11 @@ func (suite *CliTestSuite) TestPayloadSimple() {
 		"spark.cores.max": maxCores,
 		"spark.mesos.executor.docker.forcePullImage": "true",
 		"spark.mesos.executor.docker.image": image,
-		"spark.mesos.task.labels": fmt.Sprintf("DCOS_SPACE:%s", marathonAppId),
+		"spark.mesos.task.labels": fmt.Sprintf("DCOS_SPACE:%s", "/" + marathonAppId),
 		"spark.ssl.noCertVerification": "true",
 		"spark.executor.memory": "1G", // default
 		"spark.submit.deployMode": "cluster",
-		"spark.mesos.driver.labels": fmt.Sprintf("DCOS_SPACE:%s", marathonAppId),
+		"spark.mesos.driver.labels": fmt.Sprintf("DCOS_SPACE:%s", "/" + marathonAppId),
 		"spark.driver.memory": driverMemory,
 		"spark.jars": appJar,
 	}
@@ -151,7 +156,7 @@ func (suite *CliTestSuite) TestPayloadCustomImageNoExecutor() {
 			"%s --input1 value1 --input2 value2", driverCores, maxCores, driverMemory, mainClass, appJar)
 
 	cmd := createCommand(inputArgs, "")
-	payload, err := buildSubmitJson(&cmd, marathonConfig)
+	payload, err := buildSubmitJson(&cmd)
 
 	m := make(map[string]interface{})
 
@@ -174,11 +179,11 @@ func (suite *CliTestSuite) TestPayloadCustomImageNoExecutor() {
 		"spark.cores.max": maxCores,
 		"spark.mesos.executor.docker.forcePullImage": "false",
 		"spark.mesos.executor.docker.image": "other",
-		"spark.mesos.task.labels": fmt.Sprintf("DCOS_SPACE:%s", marathonAppId),
+		"spark.mesos.task.labels": fmt.Sprintf("DCOS_SPACE:%s", "/" + marathonAppId),
 		"spark.ssl.noCertVerification": "true",
 		"spark.executor.memory": "1G", // default
 		"spark.submit.deployMode": "cluster",
-		"spark.mesos.driver.labels": fmt.Sprintf("DCOS_SPACE:%s", marathonAppId),
+		"spark.mesos.driver.labels": fmt.Sprintf("DCOS_SPACE:%s", "/" + marathonAppId),
 		"spark.driver.memory": driverMemory,
 		"spark.jars": appJar,
 	}
@@ -215,7 +220,7 @@ func (suite *CliTestSuite) checkSecret(secretPath, secretFile string) {
 		driverCores, principal, secretPath, maxCores, driverMemory, mainClass, appJar)
 
 	cmd := createCommand(inputArgs, image)
-	payload, err := buildSubmitJson(&cmd, marathonConfig)
+	payload, err := buildSubmitJson(&cmd)
 
 	m := make(map[string]interface{})
 
@@ -252,7 +257,7 @@ func (suite *CliTestSuite) TestSaslSecret() {
 
 
 	cmd := createCommand(inputArgs, image)
-	payload, err := buildSubmitJson(&cmd, marathonConfig)
+	payload, err := buildSubmitJson(&cmd)
 
 	m := make(map[string]interface{})
 
