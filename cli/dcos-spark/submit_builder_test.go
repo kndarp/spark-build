@@ -6,6 +6,7 @@ import (
 	"github.com/mesosphere/dcos-commons/cli/config"
 	"github.com/stretchr/testify/suite"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -74,6 +75,39 @@ func (suite *CliTestSuite) TestScoptAppArgs() {
 	}
 }
 
+func (suite *CliTestSuite) testLongArgInternal(inputArgs string, expectedArgs []string) {
+       _, args := sparkSubmitArgSetup()  // setup
+       submitargs, _ := cleanUpSubmitArgs(inputArgs, args.boolVals)
+       if len(submitargs) != 2 {  // should have 1 arg that's all the java options and one that's the spark cores config
+               suite.T().Errorf("Failed to parse %s, should have 2 args, got %d", inputArgs, len(submitargs))
+       }
+       java_options_arg := submitargs[0]
+       for i, a := range expectedArgs {
+               if !strings.Contains(java_options_arg, a) {
+                       suite.T().Errorf("Expected to find %s at index %d", a, i)
+               }
+       }
+}
+
+// test long args
+func (suite *CliTestSuite) TestStringLongArgs() {
+       java_options := []string{"-Djava.firstConfig=firstSetting", "-Djava.secondConfig=secondSetting"}
+       inputArgs := "--driver-java-options '-Djava.firstConfig=firstSetting -Djava.secondConfig=secondSetting' --conf spark.cores.max=8"
+       suite.testLongArgInternal(inputArgs, java_options)
+       inputArgs = "--driver-java-options='-Djava.firstConfig=firstSetting -Djava.secondConfig=secondSetting' --conf spark.cores.max=8"
+       suite.testLongArgInternal(inputArgs, java_options)
+       inputArgs = "--conf spark.driver.extraJavaOptions='-Djava.firstConfig=firstSetting -Djava.secondConfig=secondSetting' --conf spark.cores.max=8"
+       suite.testLongArgInternal(inputArgs, java_options)
+       inputArgs = "--executor-java-options '-Djava.firstConfig=firstSetting -Djava.secondConfig=secondSetting' --conf spark.cores.max=8"
+       suite.testLongArgInternal(inputArgs, java_options)
+       inputArgs = "--conf spark.executor.extraJavaOptions='-Djava.firstConfig=firstSetting -Djava.secondConfig=secondSetting' --conf spark.cores.max=8"
+       suite.testLongArgInternal(inputArgs, java_options)
+
+       java_options = append(java_options, "-Djava.thirdConfig=thirdSetting")
+       inputArgs = "--driver-java-option='-Djava.firstConfig=firstSetting -Djava.secondConfig=secondSetting -Djava.thirdConfig=thirdSetting' --conf spark.cores.max=8"
+       suite.testLongArgInternal(inputArgs, java_options)
+}
+
 func createCommand(inputArgs, dockerImage string) SparkCommand {
 	return SparkCommand{
 		"subId",
@@ -93,8 +127,6 @@ func createCommand(inputArgs, dockerImage string) SparkCommand {
 		false,
 	}
 }
-
- No newline at end of file
 
 func (suite *CliTestSuite) TestPayloadSimple() {
 	inputArgs := fmt.Sprintf(
