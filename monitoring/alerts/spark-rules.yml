@@ -5,7 +5,7 @@ groups:
       expr: count(spark_mesos_cluster_driver_launched) >= 50
       for: 1m
       labels:
-        severity: major
+        severity: informational
       annotations:
         description: 'Spark has reached desired number of dispatchers'
 
@@ -21,7 +21,7 @@ groups:
       expr: count(spark_mesos_cluster_executor_count) >= 1000
       for: 1m
       labels:
-        severity: major
+        severity: informational
       annotations:
         description: 'Spark has reached desired number of jobs'
 
@@ -37,7 +37,7 @@ groups:
       expr: count(spark_mesos_cluster_executor_count{task_name=~".*monte.*"}) >= 750
       for: 1m
       labels:
-        severity: major
+        severity: informational
       annotations:
         description: 'Spark has reached desired number of CPU jobs'
 
@@ -45,7 +45,7 @@ groups:
       expr: count(spark_mesos_cluster_executor_count{task_name=~".*image.*"}) >= 10
       for: 1m
       labels:
-        severity: major
+        severity: informational
       annotations:
         description: 'Spark has reached desired number of GPU jobs'
 
@@ -53,7 +53,7 @@ groups:
       expr: count(spark_mesos_cluster_executor_count{task_name=~".*Kafka.*"}) >= 250
       for: 1m
       labels:
-        severity: major
+        severity: informational
       annotations:
         description: 'Spark has reached desired number of Streaming jobs'
     
@@ -93,6 +93,6 @@ groups:
       expr: (sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_finished) / (sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_finished) + sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_lost) + sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_failed))) >= 99.0
       for: 1m
       labels:
-        severity: major
+        severity: informational
       annotations:
         description: 'Spark has reached desired success rate'
