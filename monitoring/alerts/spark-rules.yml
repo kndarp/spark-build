@@ -63,7 +63,7 @@ groups:
       labels:
         severity: major
       annotations:
-        description: 'Spark getting backed up'
+        description: 'Average number of spark jobs queued for each dispatcher growing rapidly, indicating slower launch rates for new jobs or current jobs taking longer to complete'
 
     - alert: Spark_Average_Job_Duration
       expr: (avg(spark_mesos_cluster_driver_launch_to_finish_state_finished_mean) / 60000) >= 75
@@ -87,7 +87,7 @@ groups:
       labels:
         severity: major
       annotations:
-        description: 'Spark job launch time has high variance'
+        description: 'Spark job launch time has unusually high variance'
 
     - alert: Spark_Job_Success_Rate
       expr: (sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_finished) / (sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_finished) + sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_lost) + sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_failed))) >= 99.0
