@@ -22,6 +22,7 @@ const keytab = "keytab"
 const sparkAuthSecret = "spark-auth-secret"
 const marathonAppId = "spark-app"
 
+
 type CliTestSuite struct {
 	suite.Suite
 }
@@ -121,11 +122,11 @@ func (suite *CliTestSuite) TestPayloadSimple() {
 		"spark.cores.max": maxCores,
 		"spark.mesos.executor.docker.forcePullImage": "true",
 		"spark.mesos.executor.docker.image": image,
-		"spark.mesos.task.labels": fmt.Sprintf("DCOS_SPACE:%s", space),
+		"spark.mesos.task.labels": fmt.Sprintf("DCOS_SPACE:/%s", marathonAppId),
 		"spark.ssl.noCertVerification": "true",
 		"spark.executor.memory": "1G", // default
 		"spark.submit.deployMode": "cluster",
-		"spark.mesos.driver.labels": fmt.Sprintf("DCOS_SPACE:%s", space),
+		"spark.mesos.driver.labels": fmt.Sprintf("DCOS_SPACE:/%s", marathonAppId),
 		"spark.driver.memory": driverMemory,
 		"spark.jars": appJar,
 	}
