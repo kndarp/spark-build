@@ -57,13 +57,13 @@ groups:
       annotations:
         description: 'Spark has reached desired number of Streaming jobs'
     
-    - alert: Spark_Average_Queue_Depth
-      expr: avg(spark_mesos_cluster_driver_waiting) >= 50
+    - alert: Spark_Dispatcher_Queue_Depth
+      expr: spark_mesos_cluster_driver_waiting > 200
       for: 3m
       labels:
         severity: major
       annotations:
-        description: 'Average number of spark jobs queued for each dispatcher growing rapidly, indicating slower launch rates for new jobs or current jobs taking longer to complete'
+        description: 'Spark dispatcher queue depth is beyond desired limits'
 
     - alert: Spark_Average_Job_Duration
       expr: (avg(spark_mesos_cluster_driver_launch_to_finish_state_finished_mean) / 60000) >= 75
