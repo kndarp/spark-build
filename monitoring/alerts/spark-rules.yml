@@ -58,12 +58,12 @@ groups:
         description: 'Spark has reached desired number of Streaming jobs'
     
     - alert: Spark_Dispatcher_Queue_Depth
-      expr: spark_mesos_cluster_driver_waiting > 200
+      expr: count(spark_mesos_cluster_driver_waiting > 200) > 0
       for: 3m
       labels:
         severity: major
       annotations:
-        description: 'Spark dispatcher queue depth is beyond desired limits'
+        description: 'Spark dispatcher queue depth is beyond allowed product requirement. Please investigate why Spark jobs are not finishing at the same rate of launch or discontinue launching new Spark jobs.'
 
     - alert: Spark_Average_Job_Duration
       expr: (avg(spark_mesos_cluster_driver_launch_to_finish_state_finished_mean) / 60000) >= 75
@@ -74,20 +74,20 @@ groups:
         description: 'Spark jobs taking longer to complete than expected'
 
     - alert: Spark_Average_Launch_Time
-      expr: (avg(spark_mesos_cluster_executor_start_to_all_launched_mean) / 1000) >= 30
+      expr: count(spark_mesos_cluster_executor_start_to_all_launched_p99 > 30000) > 0
       for: 3m
       labels:
         severity: major
       annotations:
-        description: 'Spark jobs taking longer to launch than expected'
+        description: 'Spark jobs have a p99 launch rate greater than product requirement of 30 seconds. Generally, this indicates the overall health of the cluster is suffering and that frameworks (not just Spark) are processing fewer acceptable offers from Mesos.'
 
-    - alert: Spark_Launch_Time_Stdev
+    - alert: Spark_Launch_Time_High_Stdev
       expr: (stddev(spark_mesos_cluster_executor_start_to_all_launched_mean) / 1000) > 20.0
       for: 3m
       labels:
         severity: major
       annotations:
-        description: 'Spark job launch time has unusually high variance'
+        description: 'Spark job's launch rate has unusually high standard deviation'
 
     - alert: Spark_Job_Success_Rate
       expr: (sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_finished) / (sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_finished) + sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_lost) + sum(spark_mesos_cluster_driver_finished_count_mesos_state_task_failed))) >= 99.0
